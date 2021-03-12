@@ -9,25 +9,20 @@ const float FLOOR = 4.0;
 
 const vec3 SUN_DIRECTION = normalize(vec3(1.0, -0.9, 0.4));
 
-const mat3 RGB_2_XYZ = (mat3(
+vec3 REC709ToXYZ(vec3 rgb) {
+  return mat3(
     0.4124564, 0.2126729, 0.0193339,
     0.3575761, 0.7151522, 0.1191920,
     0.1804375, 0.0721750, 0.9503041
-));
-
-const mat3 XYZ_2_RGB = (mat3(
-     3.2404542,-0.9692660, 0.0556434,
-    -1.5371385, 1.8760108,-0.2040259,
-    -0.4985314, 0.0415560, 1.0572252
-));
-
-
-vec3 REC709ToXYZ(vec3 rgb) {
-    return RGB_2_XYZ * rgb;
+  ) * rgb;
 }
 
 vec3 XYZToREC709(vec3 xyz) {
-    return XYZ_2_RGB * xyz;
+  return mat3(
+     3.2404542,-0.9692660, 0.0556434,
+    -1.5371385, 1.8760108,-0.2040259,
+    -0.4985314, 0.0415560, 1.0572252
+  ) * xyz;
 }
 
 vec3 XYZToxyY(vec3 xyz) {
@@ -57,34 +52,27 @@ vec3 REC709TosRGB(vec3 rgb) {
 
 vec3 tonemap(vec3 x)
 {
-    // float a = 2.51;
-    // float b = 0.03;
-    // float c = 2.43;
-    // float d = 0.59;
-    // float e = 0.14;
-    // return (x*(a*x+b))/(x*(c*x+d)+e);
-    vec3 xyY = XYZToxyY(REC709ToXYZ(sRGBToREC709(x)));
-    float Y = xyY.z;
-    float scaledY = Y / (1.0 + Y);
-    xyY.z = scaledY;
-    return REC709TosRGB(XYZToREC709(xyYToXYZ(xyY)));
+  vec3 xyY = XYZToxyY(REC709ToXYZ(x));
+  float Y = xyY.z;
+  float scaledY = Y / (1.0 + Y);
+  xyY.z = scaledY;
+  return XYZToREC709(xyYToXYZ(xyY));
 }
 
-float smin( float d1, float d2, float k )
-{
-    float h = clamp( 0.5 + 0.5*(d2-d1)/k, 0.0, 1.0 );
-    return mix( d2, d1, h ) - k*h*(1.0-h);
+float smin( float d1, float d2, float k ) {
+  float h = clamp( 0.5 + 0.5*(d2-d1)/k, 0.0, 1.0 );
+  return mix( d2, d1, h ) - k*h*(1.0-h);
 }
 
-float smax( float d1, float d2, float k )
-{
-    float h = clamp( 0.5 - 0.5*(d2+d1)/k, 0.0, 1.0 );
-    return mix( d2, -d1, h ) + k*h*(1.0-h);
+float smax( float d1, float d2, float k ) {
+  float h = clamp( 0.5 - 0.5*(d2+d1)/k, 0.0, 1.0 );
+  return mix( d2, -d1, h ) + k*h*(1.0-h);
 }
 
 float lerp(float a, float b, float mix) {
   return (a * (1.0 - mix)) + (b * mix);
 }
+
 vec3 lerp(vec3 a, vec3 b, float mix) {
   return (a * (1.0 - mix)) + (b * mix);
 }
@@ -135,7 +123,6 @@ vec2 sdWorld(vec3 p) {
   float col = SKY;
 
   float lineDist = line(0.2, p - vec3(0.0, 0.0, 0.2));
-  // float floorDist = plane(0.0, p);
   float floorDist = box(vec3(1.0, 1.0, 0.0001), p + vec3(0.0, 0.0, 0.5)) - 0.5;
   float sphereDist = sphere(0.4, p - vec3(0.7, 0.4, 0.4));
 
@@ -212,12 +199,11 @@ vec4 trace(vec3 o, vec3 d) {
 }
 
 vec3 shadeCol(vec3 o, vec3 d, float matIndex) {
-  if(matIndex == LINE) return vec3(0.2, 0.7, 0.2);
-  if(matIndex == SPHERE) return vec3(1.0);
+  if(matIndex == LINE) return vec3(0.05);
+  if(matIndex == SPHERE) return vec3(0.9);
   if(matIndex == FLOOR) return floorCol(o);
   // if(matIndex == SKY)
   return skyCol(d);
-  return vec3(0.0);
 }
 
 vec3 shadeSimple(vec3 o, vec3 d, float matIndex) {
@@ -256,7 +242,6 @@ vec3 shade(vec3 o, vec3 d, float matIndex) {
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord)
 {
-    // Normalized pixel coordinates (from 0 to 1)
     vec2 uv = fragCoord/iResolution.xy;
     vec2 halfRes = iResolution.xy / 2.0;
     float iMax = max(iResolution.x, iResolution.y);
@@ -278,5 +263,4 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     float matIndex = result.w;
     vec3 col = shade(result.xyz, rayDirection, matIndex);
     fragColor = vec4(tonemap(col), 1.0);
-    // fragColor = vec4(tonemap(col), 1.0);
 }
