@@ -7,7 +7,53 @@ const float LINE = 1.0;
 const float SPHERE = 3.0;
 const float FLOOR = 4.0;
 
-const vec3 SUN_DIRECTION = normalize(vec3(1.0, -0.9, 1.4));
+const vec3 SUN_DIRECTION = normalize(vec3(1.0, -0.9, 0.4));
+
+const mat3 RGB_2_XYZ = (mat3(
+    0.4124564, 0.2126729, 0.0193339,
+    0.3575761, 0.7151522, 0.1191920,
+    0.1804375, 0.0721750, 0.9503041
+));
+
+const mat3 XYZ_2_RGB = (mat3(
+     3.2404542,-0.9692660, 0.0556434,
+    -1.5371385, 1.8760108,-0.2040259,
+    -0.4985314, 0.0415560, 1.0572252
+));
+
+
+vec3 REC709ToXYZ(vec3 rgb) {
+    return RGB_2_XYZ * rgb;
+}
+
+vec3 XYZToREC709(vec3 xyz) {
+    return XYZ_2_RGB * xyz;
+}
+
+vec3 XYZToxyY(vec3 xyz) {
+  float sum = xyz.x + xyz.y + xyz.z;
+  return vec3(
+    xyz.x / sum,
+    xyz.y / sum,
+    xyz.y
+  );
+}
+
+vec3 xyYToXYZ(vec3 xyz) {
+  return vec3(
+    (xyz.x * xyz.z )/ xyz.y,
+    xyz.z,
+    ((1.0 - xyz.x - xyz.y) * xyz.z) / xyz.y
+  );
+}
+
+vec3 sRGBToREC709(vec3 rgb) {
+  return pow(rgb, vec3(2.2));
+}
+
+vec3 REC709TosRGB(vec3 rgb) {
+  return pow(rgb, vec3(1.0 / 2.2));
+}
 
 vec3 tonemap(vec3 x)
 {
@@ -17,7 +63,11 @@ vec3 tonemap(vec3 x)
     // float d = 0.59;
     // float e = 0.14;
     // return (x*(a*x+b))/(x*(c*x+d)+e);
-    return vec3(0.0);
+    vec3 xyY = XYZToxyY(REC709ToXYZ(sRGBToREC709(x)));
+    float Y = xyY.z;
+    float scaledY = Y / (1.0 + Y);
+    xyY.z = scaledY;
+    return REC709TosRGB(XYZToREC709(xyYToXYZ(xyY)));
 }
 
 float smin( float d1, float d2, float k )
@@ -68,8 +118,8 @@ float plane(float h, vec3 p) {
 
 vec3 skyCol(vec3 d) {
   float sunFacing = max(dot(d, SUN_DIRECTION), 0.0);
-  if (sunFacing > 0.99) {
-    return vec3(4.0);
+  if (sunFacing > 0.994) {
+    return vec3(8.0);
   }
   float groundOcclusion = 1.0 - max(d.z * -1.0, 0.0);
   vec3 sky = lerp(vec3(0.8, 1.2, 2.0), vec3(1.3, 1.8, 2.0), d.z * -1.0);
@@ -77,7 +127,7 @@ vec3 skyCol(vec3 d) {
 }
 
 vec3 floorCol(vec3 o) {
-  return vec3(0.5) + vec3(sin(o.x * 20.0), sin(o.y * 10.0), 0.0) / PI;
+  return vec3(0.5) + vec3(sin(o.x * 20.0), sin(o.y * 10.0), sin(o.z * 30.0)) / PI;
 }
 
 vec2 sdWorld(vec3 p) {
@@ -86,7 +136,7 @@ vec2 sdWorld(vec3 p) {
 
   float lineDist = line(0.2, p - vec3(0.0, 0.0, 0.2));
   // float floorDist = plane(0.0, p);
-  float floorDist = box(vec3(2.0, 2.0, 1.0), p + vec3(0.0, 0.0, 1.0));
+  float floorDist = box(vec3(1.0, 1.0, 0.0001), p + vec3(0.0, 0.0, 0.5)) - 0.5;
   float sphereDist = sphere(0.4, p - vec3(0.7, 0.4, 0.4));
 
   if(lineDist < minDist) {
@@ -121,10 +171,10 @@ vec3 reflect(vec3 ri, vec3 n) {
 }
 
 float softShadow(vec3 o, vec3 d) {
-  const int maxIterations = 16;
+  const int maxIterations = 1 << 5;
   float nearest = 1.0;
   
-  float t = 0.1;
+  float t = 0.2;
   for(int i = 0; i < maxIterations; i++)
   {
     vec3 p = o + d * t;
@@ -147,7 +197,7 @@ float softShadow(vec3 o, vec3 d) {
 
 vec4 trace(vec3 o, vec3 d) {
   int iterations = 0;
-  int maxIterations = 64;
+  int maxIterations = 1 << 6;
   while (iterations < maxIterations) {
     vec2 result = sdWorld(o);
     float minDist = result.x;
@@ -162,10 +212,11 @@ vec4 trace(vec3 o, vec3 d) {
 }
 
 vec3 shadeCol(vec3 o, vec3 d, float matIndex) {
-  if(matIndex == SKY) return skyCol(d);
   if(matIndex == LINE) return vec3(0.2, 0.7, 0.2);
-  if(matIndex == SPHERE) return vec3(0.9, 0.2, 0.1);
+  if(matIndex == SPHERE) return vec3(1.0);
   if(matIndex == FLOOR) return floorCol(o);
+  // if(matIndex == SKY)
+  return skyCol(d);
   return vec3(0.0);
 }
 
@@ -212,8 +263,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     vec2 uvCover = 2.0 * (fragCoord - halfRes) / iMax;
 
     vec3 o = vec3(
-      3.0 * cos(iTime / PI),
-      3.0 * sin(iTime / 2.0),
+      2.0 * cos(iTime / PI),
+      2.0 * sin(iTime / 2.0),
       1.0
     );
     float zoom = 1.0;
@@ -226,6 +277,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     vec4 result = trace(o, rayDirection);
     float matIndex = result.w;
     vec3 col = shade(result.xyz, rayDirection, matIndex);
-    fragColor = vec4(col, 1.0);
+    fragColor = vec4(tonemap(col), 1.0);
     // fragColor = vec4(tonemap(col), 1.0);
 }
