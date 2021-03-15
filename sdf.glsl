@@ -252,11 +252,22 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     float iMax = max(iResolution.x, iResolution.y);
     vec2 uvCover = 2.0 * (fragCoord - halfRes) / iMax;
 
-    vec3 o = vec3(
+    #iUniform float motion = 1.0 in {0.0, 1.0};
+
+
+    vec3 staticO = vec3(
+      2.0,
+      -0.2,
+      1.0
+    );
+    
+    vec3 movingO = vec3(
       2.0 * cos(iTime / PI),
       2.0 * sin(iTime / 2.0),
       1.0
     );
+
+    vec3 o = lerp(staticO, movingO, motion);
     float zoom = 1.0;
     vec3 target = vec3(0.0, 0.0, 0.5);
     vec3 globalUp = vec3(0.0, 0.0, 1.0);
