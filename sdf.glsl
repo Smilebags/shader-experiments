@@ -50,15 +50,6 @@ vec3 REC709TosRGB(vec3 rgb) {
   return pow(rgb, vec3(1.0 / 2.2));
 }
 
-vec3 tonemap(vec3 x)
-{
-  vec3 xyY = XYZToxyY(REC709ToXYZ(x));
-  float Y = xyY.z;
-  float scaledY = Y / (1.0 + Y);
-  xyY.z = scaledY;
-  return XYZToREC709(xyYToXYZ(xyY));
-}
-
 float smin( float d1, float d2, float k ) {
   float h = clamp( 0.5 + 0.5*(d2-d1)/k, 0.0, 1.0 );
   return mix( d2, d1, h ) - k*h*(1.0-h);
@@ -79,6 +70,21 @@ vec3 lerp(vec3 a, vec3 b, float mix) {
 
 float dist(vec3 p1, vec3 p2) {
   return length(p2 - p1);
+}
+
+vec3 tonemap(vec3 x)
+{
+  vec3 xyY = XYZToxyY(REC709ToXYZ(x));
+  float Y = xyY.z;
+  float scaledY = Y / (1.0 + Y);
+  xyY.z = scaledY;
+
+  vec3 whitexyY = XYZToxyY(REC709ToXYZ(vec3(1.0)));
+
+  float saturationFactor = 1.0 - pow(1.0 / (1.0 + Y), 0.5);
+  xyY.x = lerp(xyY.x, whitexyY.x, saturationFactor);
+  xyY.y = lerp( xyY.y, whitexyY.y, saturationFactor);
+  return XYZToREC709(xyYToXYZ(xyY));
 }
 
 float sphere(float r, vec3 p) {
@@ -107,7 +113,7 @@ float plane(float h, vec3 p) {
 vec3 skyCol(vec3 d) {
   float sunFacing = max(dot(d, SUN_DIRECTION), 0.0);
   if (sunFacing > 0.994) {
-    return vec3(8.0);
+    return vec3(1.0, 0.75, 0.5) * 64.0;
   }
   float groundOcclusion = 1.0 - max(d.z * -1.0, 0.0);
   vec3 sky = lerp(vec3(0.8, 1.2, 2.0), vec3(1.3, 1.8, 2.0), d.z * -1.0);
@@ -199,10 +205,9 @@ vec4 trace(vec3 o, vec3 d) {
 }
 
 vec3 shadeCol(vec3 o, vec3 d, float matIndex) {
-  if(matIndex == LINE) return vec3(0.05);
-  if(matIndex == SPHERE) return vec3(0.9);
+  if(matIndex == LINE) return vec3(0.05, 0.08, 0.1);
+  if(matIndex == SPHERE) return vec3(0.95, 0.3, 0.02);
   if(matIndex == FLOOR) return floorCol(o);
-  // if(matIndex == SKY)
   return skyCol(d);
 }
 
@@ -262,5 +267,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     vec4 result = trace(o, rayDirection);
     float matIndex = result.w;
     vec3 col = shade(result.xyz, rayDirection, matIndex);
-    fragColor = vec4(tonemap(col), 1.0);
+
+    #iUniform float ev = 0.0 in {-10.0, 10.0};
+    #iUniform float tonemapSwipe = 1.0 in {0.0, 1.0};
+    float exposure = pow(2.0, ev);
+    vec3 displayColour = uv.x > tonemapSwipe ? col * exposure: tonemap(col * exposure);
+    fragColor = vec4(displayColour, 1.0);
 }
