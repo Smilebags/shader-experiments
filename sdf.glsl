@@ -6,6 +6,7 @@ const float SKY = 0.0;
 const float LINE = 1.0;
 const float SPHERE = 3.0;
 const float FLOOR = 4.0;
+const float BOX = 5.0;
 
 const vec3 SUN_DIRECTION = normalize(vec3(1.0, -0.9, 0.4));
 
@@ -68,6 +69,10 @@ vec3 lerp(vec3 a, vec3 b, float mix) {
   return (a * (1.0 - mix)) + (b * mix);
 }
 
+vec4 lerp(vec4 a, vec4 b, float mix) {
+  return (a * (1.0 - mix)) + (b * mix);
+}
+
 float dist(vec3 p1, vec3 p2) {
   return length(p2 - p1);
 }
@@ -112,8 +117,8 @@ float plane(float h, vec3 p) {
 
 vec3 skyCol(vec3 d) {
   float sunFacing = max(dot(d, SUN_DIRECTION), 0.0);
-  if (sunFacing > 0.994) {
-    return vec3(1.0, 0.75, 0.5) * 64.0;
+  if (sunFacing > 0.995) {
+    return vec3(1.0, 0.75, 0.5) * 128.0;
   }
   float groundOcclusion = 1.0 - max(d.z * -1.0, 0.0);
   vec3 sky = lerp(vec3(0.8, 1.2, 2.0), vec3(1.3, 1.8, 2.0), d.z * -1.0);
@@ -121,7 +126,11 @@ vec3 skyCol(vec3 d) {
 }
 
 vec3 floorCol(vec3 o) {
-  return vec3(0.5) + vec3(sin(o.x * 20.0), sin(o.y * 10.0), sin(o.z * 30.0)) / PI;
+  return vec3(0.5) + vec3(
+    sin(o.x * 20.0),
+    sin(o.y * 10.0),
+    sin(o.z * 30.0)
+  ) / PI;
 }
 
 vec2 sdWorld(vec3 p) {
@@ -131,6 +140,7 @@ vec2 sdWorld(vec3 p) {
   float lineDist = line(0.2, p - vec3(0.0, 0.0, 0.2));
   float floorDist = box(vec3(1.0, 1.0, 0.0001), p + vec3(0.0, 0.0, 0.5)) - 0.5;
   float sphereDist = sphere(0.4, p - vec3(0.7, 0.4, 0.4));
+  float boxDist = box(vec3(0.298), p - vec3(0.9, -0.4, 0.4)) - 0.02;
 
   if(lineDist < minDist) {
     minDist = lineDist;
@@ -145,6 +155,12 @@ vec2 sdWorld(vec3 p) {
   if(floorDist < minDist) {
     minDist = floorDist;
     col = FLOOR;
+  }
+
+
+  if(boxDist < minDist) {
+    minDist = boxDist;
+    col = BOX;
   }
   return vec2(minDist, col);
 }
@@ -183,9 +199,25 @@ float softShadow(vec3 o, vec3 d) {
     if(d >= INFINITY) {
       break;
     }
-    t += min(0.5, max(EPSILON, d));
+    t += min(0.2, max(EPSILON, d));
   }
   return nearest;
+}
+
+float hardShadow(vec3 o, vec3 d) {
+  int iterations = 0;
+  int maxIterations = 1 << 6;
+  float minDist = 1000000.0;
+  while (iterations < maxIterations) {
+    vec2 result = sdWorld(o);
+    minDist = result.x;
+    o += d * minDist;
+    if (minDist <= EPSILON) {
+      return 0.0;
+    }
+    iterations += 1;
+  }
+  return 1.0;
 }
 
 vec4 trace(vec3 o, vec3 d) {
@@ -204,45 +236,60 @@ vec4 trace(vec3 o, vec3 d) {
   return vec4(o, SKY);
 }
 
-vec3 shadeCol(vec3 o, vec3 d, float matIndex) {
-  if(matIndex == LINE) return vec3(0.05, 0.08, 0.1);
-  if(matIndex == SPHERE) return vec3(0.95, 0.3, 0.02);
-  if(matIndex == FLOOR) return floorCol(o);
-  return skyCol(d);
+vec4 shadeParams(vec3 o, vec3 d, float matIndex) {
+  #iUniform float metalness = 1.0 in {0.0, 1.0};
+
+  if(matIndex == LINE) return vec4(0.0, 0.2, 0.4, metalness);
+  if(matIndex == SPHERE) return vec4(0.95, 0.3, 0.02, metalness);
+  if(matIndex == FLOOR) return vec4(floorCol(o), 0.0);
+  if(matIndex == BOX) return vec4(0.02, 0.3, 0.02, metalness);
+  return vec4(skyCol(d), 0.0);
+}
+
+vec3 shadeMix(
+  vec3 baseCol,
+  vec3 reflection,
+  vec3 shadeFactor,
+  float fresnel,
+  float metalness
+) {
+  vec3 dielectricCol = baseCol * shadeFactor;
+  vec3 metalCol = reflection * baseCol;
+  vec3 col = lerp(dielectricCol, metalCol, metalness);
+  return lerp(col, reflection, fresnel);
 }
 
 vec3 shadeSimple(vec3 o, vec3 d, float matIndex) {
   if(matIndex == SKY) {
-    return skyCol(d);
+    return skyCol(d).xyz;
   }
-  vec3 col = shadeCol(o, d, matIndex);
-
   vec3 n = normal(o);
   float cameraFacing = dot(n, d * -1.0);
   float fresnel = lerp(0.04, 1.0, pow(1.0 - cameraFacing, 4.0));
-  vec3 shadeFactor = lerp(vec3(0.1, 0.2, 0.3), vec3(1.0, 1.0, 1.0), softShadow(o, SUN_DIRECTION));
+  vec3 shadeFactor = lerp(vec3(0.1, 0.2, 0.3), vec3(1.0, 1.0, 1.0), softShadow(o + n * EPSILON * 2.0, SUN_DIRECTION));
+
   
-  vec3 skyColour = skyCol(reflect(d, n));
-  vec3 ref = lerp(col, skyColour, fresnel);
-  return ref * shadeFactor;
+  vec4 params = shadeParams(o, d, matIndex);
+  vec3 ref = skyCol(reflect(d, n));
+  return shadeMix(params.xyz, ref, shadeFactor, fresnel, params.w);
 }
 
 vec3 shade(vec3 o, vec3 d, float matIndex) {
   if(matIndex == SKY) {
-    return skyCol(d);
+    return skyCol(d).xyz;
   }
   vec3 n = normal(o);
-
   float cameraFacing = dot(n, d * -1.0);
   float fresnel = lerp(0.04, 1.0, pow(1.0 - cameraFacing, 4.0));
+  vec3 shadeFactor = lerp(vec3(0.1, 0.2, 0.3), vec3(1.0, 1.0, 1.0), softShadow(o + n * EPSILON * 2.0, SUN_DIRECTION));
 
-  vec3 shadeFactor = lerp(vec3(0.1, 0.2, 0.3), vec3(1.0, 1.0, 1.0), softShadow(o, SUN_DIRECTION));
+
   
-  vec3 col = shadeCol(o, d, matIndex);
+  vec4 params = shadeParams(o, d, matIndex);
   vec3 newD = reflect(d, n);
   vec4 reflectedPoint = trace(o + n * EPSILON * 2.0, newD);
   vec3 ref = shadeSimple(reflectedPoint.xyz, newD, reflectedPoint.w);
-  return lerp(col * shadeFactor, ref, fresnel);
+  return shadeMix(params.xyz, ref, shadeFactor, fresnel, params.w);
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord)
