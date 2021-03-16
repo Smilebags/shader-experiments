@@ -118,7 +118,7 @@ float plane(float h, vec3 p) {
 vec3 skyCol(vec3 d) {
   float sunFacing = max(dot(d, SUN_DIRECTION), 0.0);
   if (sunFacing > 0.995) {
-    return vec3(1.0, 0.75, 0.5) * 128.0;
+    return vec3(1.0, 0.5, 0.2) * 128.0;
   }
   float groundOcclusion = 1.0 - max(d.z * -1.0, 0.0);
   vec3 sky = lerp(vec3(0.8, 1.2, 2.0), vec3(1.3, 1.8, 2.0), d.z * -1.0);
@@ -281,7 +281,7 @@ vec3 shade(vec3 o, vec3 d, float matIndex) {
   vec3 n = normal(o);
   float cameraFacing = dot(n, d * -1.0);
   float fresnel = lerp(0.04, 1.0, pow(1.0 - cameraFacing, 4.0));
-  vec3 shadeFactor = lerp(vec3(0.1, 0.2, 0.3), vec3(1.0, 1.0, 1.0), softShadow(o + n * EPSILON * 2.0, SUN_DIRECTION));
+  vec3 shadeFactor = lerp(vec3(0.1, 0.2, 0.3), vec3(1.0, 0.9, 0.8), softShadow(o + n * EPSILON * 2.0, SUN_DIRECTION));
 
 
   
