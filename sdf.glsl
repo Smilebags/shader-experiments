@@ -10,6 +10,9 @@ const float BOX = 5.0;
 
 const vec3 SUN_DIRECTION = normalize(vec3(1.0, -0.9, 0.4));
 
+const float SKY_BRIGHTNESS = 2.0;
+const float SUN_BRIGHTNESS = 4096.0;
+
 vec3 REC709ToXYZ(vec3 rgb) {
   return mat3(
     0.4124564, 0.2126729, 0.0193339,
@@ -77,19 +80,51 @@ float dist(vec3 p1, vec3 p2) {
   return length(p2 - p1);
 }
 
+
 vec3 tonemap(vec3 x)
 {
   vec3 xyY = XYZToxyY(REC709ToXYZ(x));
   float Y = xyY.z;
-  float scaledY = Y / (1.0 + Y);
-  xyY.z = scaledY;
 
-  vec3 whitexyY = XYZToxyY(REC709ToXYZ(vec3(1.0)));
+  // highlight desaturation
+  #iUniform float highlightDesaturation = 1.0 in {0.0, 1.0};
+  if(highlightDesaturation != 0.0) {
+    float reinhardtBrightness = 1.0 / (1.0 + Y);
+    float saturationFactor = pow(reinhardtBrightness, highlightDesaturation);
+    float desaturationFactor = 1.0 - saturationFactor;
+    vec3 whitexyY = XYZToxyY(REC709ToXYZ(vec3(1.0)));
+    xyY.x = lerp(xyY.x, whitexyY.x, desaturationFactor);
+    xyY.y = lerp( xyY.y, whitexyY.y, desaturationFactor);
+  }
 
-  float saturationFactor = 1.0 - pow(1.0 / (1.0 + Y), 0.5);
-  xyY.x = lerp(xyY.x, whitexyY.x, saturationFactor);
-  xyY.y = lerp( xyY.y, whitexyY.y, saturationFactor);
-  return XYZToREC709(xyYToXYZ(xyY));
+  vec3 postDesat = XYZToREC709(xyYToXYZ(xyY));
+
+  float m = max(max(postDesat.x, postDesat.y), postDesat.z);
+  float scaleFactor = m / (1.0 + m);
+  postDesat *= scaleFactor / m;
+  return postDesat;
+}
+
+vec3 clipColour(vec3 col) {
+  if (col.x > 1.0) {
+    col.x = 0.;
+  }
+  if (col.y > 1.0) {
+    col.y = 0.;
+  }
+  if (col.z > 1.0) {
+    col.z = 0.;
+  }
+  if (col.x < 0.0) {
+    col.x = 1.0;
+  }
+  if (col.y < 0.0) {
+    col.y = 1.0;
+  }
+  if (col.z < 0.0) {
+    col.z = 1.0;
+  }
+  return col;
 }
 
 float sphere(float r, vec3 p) {
@@ -118,19 +153,19 @@ float plane(float h, vec3 p) {
 vec3 skyCol(vec3 d) {
   float sunFacing = max(dot(d, SUN_DIRECTION), 0.0);
   if (sunFacing > 0.995) {
-    return vec3(1.0, 0.5, 0.2) * 128.0;
+    return vec3(1.0, 0.5, 0.2) * SUN_BRIGHTNESS;
   }
   float groundOcclusion = 1.0 - max(d.z * -1.0, 0.0);
   vec3 sky = lerp(vec3(0.8, 1.2, 2.0), vec3(1.3, 1.8, 2.0), d.z * -1.0);
-  return (sky + pow(sunFacing, 4.0)) * groundOcclusion;
+  return (sky + pow(sunFacing, 4.0)) * groundOcclusion * SKY_BRIGHTNESS;
 }
 
 vec3 floorCol(vec3 o) {
-  return vec3(0.5) + vec3(
+  return (vec3(0.5) + vec3(
     sin(o.x * 20.0),
     sin(o.y * 10.0),
     sin(o.z * 30.0)
-  ) / PI;
+  ) / PI) * SKY_BRIGHTNESS;
 }
 
 vec2 sdWorld(vec3 p) {
@@ -281,7 +316,7 @@ vec3 shade(vec3 o, vec3 d, float matIndex) {
   vec3 n = normal(o);
   float cameraFacing = dot(n, d * -1.0);
   float fresnel = lerp(0.04, 1.0, pow(1.0 - cameraFacing, 4.0));
-  vec3 shadeFactor = lerp(vec3(0.1, 0.2, 0.3), vec3(1.0, 0.9, 0.8), softShadow(o + n * EPSILON * 2.0, SUN_DIRECTION));
+  vec3 shadeFactor = lerp(vec3(0.1, 0.2, 0.3), vec3(1.0, 0.9, 0.8), softShadow(o + n * EPSILON * 2.0, SUN_DIRECTION)) * SKY_BRIGHTNESS;
 
 
   
@@ -328,7 +363,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
 
     #iUniform float ev = 0.0 in {-10.0, 10.0};
     #iUniform float tonemapSwipe = 1.0 in {0.0, 1.0};
+    #iUniform int clipOutOfGamut = 1 in {0, 1};
     float exposure = pow(2.0, ev);
     vec3 displayColour = uv.x > tonemapSwipe ? col * exposure: tonemap(col * exposure);
+    if (clipOutOfGamut == 1) {
+      displayColour = clipColour(displayColour);
+    }
     fragColor = vec4(displayColour, 1.0);
 }
