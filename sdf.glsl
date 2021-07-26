@@ -12,6 +12,7 @@ const vec3 SUN_DIRECTION = normalize(vec3(1.0, -0.9, 0.4));
 
 const float SKY_BRIGHTNESS = 2.0;
 const float SUN_BRIGHTNESS = 4096.0;
+const float SUN_SIZE = 0.001;
 
 vec3 REC709ToXYZ(vec3 rgb) {
   return mat3(
@@ -81,6 +82,7 @@ float dist(vec3 p1, vec3 p2) {
 }
 
 
+// TODO: make bright red on top of saturated green brighter than surroundings
 vec3 tonemap(vec3 x)
 {
   vec3 xyY = XYZToxyY(REC709ToXYZ(x));
@@ -103,6 +105,10 @@ vec3 tonemap(vec3 x)
   float scaleFactor = m / (1.0 + m);
   postDesat *= scaleFactor / m;
   return postDesat;
+}
+
+float noise(vec3 p) {
+  return fract(sin(dot(p, vec3(12.9898, 78.233, 151.7182))) * 43758.5453);
 }
 
 vec3 clipColour(vec3 col) {
@@ -149,10 +155,9 @@ float plane(float h, vec3 p) {
   return p.z - h;
 }
 
-
 vec3 skyCol(vec3 d) {
   float sunFacing = max(dot(d, SUN_DIRECTION), 0.0);
-  if (sunFacing > 0.995) {
+  if (sunFacing > (1.0 - SUN_SIZE)) {
     return vec3(1.0, 0.5, 0.2) * SUN_BRIGHTNESS;
   }
   float groundOcclusion = 1.0 - max(d.z * -1.0, 0.0);
@@ -161,11 +166,12 @@ vec3 skyCol(vec3 d) {
 }
 
 vec3 floorCol(vec3 o) {
-  return (vec3(0.5) + vec3(
-    sin(o.x * 20.0),
-    sin(o.y * 10.0),
-    sin(o.z * 30.0)
-  ) / PI) * SKY_BRIGHTNESS;
+  // return (vec3(0.5) + vec3(
+  //   sin(o.x * 20.0),
+  //   sin(o.y * 10.0),
+  //   sin(o.z * 30.0)
+  // ) / PI) * SKY_BRIGHTNESS;
+  return vec3(0.01, 0.5, 0.01) * SKY_BRIGHTNESS;
 }
 
 vec2 sdWorld(vec3 p) {
@@ -368,6 +374,21 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     vec3 displayColour = uv.x > tonemapSwipe ? col * exposure: tonemap(col * exposure);
     if (clipOutOfGamut == 1) {
       displayColour = clipColour(displayColour);
+    }
+    // add dithering
+    #iUniform int useDithering = 1 in {0, 1};
+    if (useDithering == 1) {
+      // weighted average of the RGB components to get luminance
+      float l = 0.299 * displayColour.r + 0.587 * displayColour.g + 0.114 * displayColour.b;
+      float q = 1.0/256.0;
+      float ditheringAmount = q;
+      // gradually reduce the amount of dithering as approaching border values
+      if (l < q) {
+        ditheringAmount = l;
+      } else if (l > (1.0 - q)) {
+        ditheringAmount = 1.0 - l;
+      }
+      displayColour += (noise(vec3(uv.x, uv.y, iTime)) - 0.5) * ditheringAmount;
     }
     fragColor = vec4(displayColour, 1.0);
 }
