@@ -1,4 +1,5 @@
 #iChannel0 "file://images/29.jpg"
+#iChannel1 "file://images/uv.jpg"
 
 
 const vec3 D50 = vec3(0.96422, 1.00000, 0.82521);
@@ -139,28 +140,24 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
   #iUniform float exposure = 0.0 in {-5.0, 5.0};
   #iUniform float blacks = 0.0 in {-1.0, 1.0};
 
-  vec3 rgb = texture2D( iChannel0, uvCover).rgb;
+  vec3 mappedUv = texture2D( iChannel1, uvCover).rgb;
+  vec3 rgb = texture2D( iChannel0, mappedUv.rg).rgb;
   vec3 col = rgb;
   // vec3 col = adapt(REC709ToXYZ((rgb)), E, D65);
   float exposureMultiplier = pow(2.0, exposure);
   col += blacks;
   col *= exposureMultiplier;
-  // vec3 col = locus(offsetUv);
   
-  vec3 lms = XYZToLMS(REC709ToXYZ(col));
-  vec3 white = XYZToLMS(REC709ToXYZ(vec3(1.0)));
-  float total = lms.x + lms.y + lms.z;
-  float whiteTotal = white.x + white.y + white.z;
-  float scaledTotal = total / whiteTotal;
-  vec3 resultRGB = vec3(scaledTotal);
-
   #iUniform float sweep = 0.0 in {0.0, 1.0};
   if (uv.x <= sweep) {
-    resultRGB = col;
+    col = mappedUv;
   }
-
-
-  fragColor = vec4(resultRGB, 1.0);
+  #iUniform float sweep2 = 0.0 in {0.0, 1.0};
+  if (uv.x <= sweep2) {
+    col = texture2D( iChannel0, uvCover).rgb;
+  }
+  fragColor = vec4(col, 1.0);
+  // fragColor = lerp(fragColor, vec4(1.0, 0.0, 0.0, 1.0), mappedUv.b);
   // vec3 resultRGB = (XYZToREC709((col)));
 
   // fragColor = vec4(uvCover.x, uvCover.y, 0.0, 1.0);
