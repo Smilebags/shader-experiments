@@ -383,7 +383,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
       float q = 1.0/256.0;
       float ditheringAmount = q;
       // gradually reduce the amount of dithering as approaching border values
-      if (l < q) {
+      if (l <= 0.0 || l >= 1.0) {
+        ditheringAmount = 0.0;
+      } else if (l < q) {
         ditheringAmount = l;
       } else if (l > (1.0 - q)) {
         ditheringAmount = 1.0 - l;
