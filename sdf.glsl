@@ -390,6 +390,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
 
     // add dithering
     #iUniform int useDithering = 1 in {0, 1};
+    #iUniform int useTimeNoiseSeed = 1 in {0, 1};
     if (useDithering == 1) {
       // weighted average of the RGB components to get luminance
       float l = 0.299 * displayColour.r + 0.587 * displayColour.g + 0.114 * displayColour.b;
@@ -404,7 +405,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
       } else if (l > (1.0 - q)) {
         ditheringAmount = 1.0 - l;
       }
-      displayColour += (noise(vec3(uv.x, uv.y, mod(iTime, 1.0))) - 0.5) * ditheringAmount;
+      float timeComponent = useTimeNoiseSeed == 1 ? mod(iTime, 1.0) : 0.0;
+      displayColour += (noise(vec3(uv.x, uv.y, timeComponent)) - 0.5) * ditheringAmount;
     }
     // force to 8 bit precision
     displayColour = floor((displayColour * (steps-1.0)) + 0.5) / (steps-1.0);
