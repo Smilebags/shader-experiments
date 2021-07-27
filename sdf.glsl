@@ -85,13 +85,21 @@ float dist(vec3 p1, vec3 p2) {
 // TODO: make bright red on top of saturated green brighter than surroundings
 vec3 tonemap(vec3 x)
 {
-  vec3 xyY = XYZToxyY(REC709ToXYZ(x));
-  float Y = xyY.z;
+  vec3 xyz = REC709ToXYZ(x);
+  vec3 xyY = XYZToxyY(xyz);
 
   // highlight desaturation
-  #iUniform float highlightDesaturation = 1.0 in {0.0, 1.0};
+  #iUniform float highlightDesaturation = 0.5 in {0.0, 1.0};
   if(highlightDesaturation != 0.0) {
-    float reinhardtBrightness = 1.0 / (1.0 + Y);
+    float Y = xyY.z;
+    // helmholtz-kohlrausch effect
+    float hk_y_term = (0.35 - xyY.y);
+    float hk_x_term = (xyY.x - 0.35);
+    float hk = max(0.0, 2.0 * hk_y_term + 2.0 * hk_x_term);
+    // return vec3(hk);
+    float luminanceMultiplier = 1.0;
+    luminanceMultiplier = hk + 1.0;
+    float reinhardtBrightness = 1.0 / (1.0 + (Y * luminanceMultiplier));
     float saturationFactor = pow(reinhardtBrightness, highlightDesaturation);
     float desaturationFactor = 1.0 - saturationFactor;
     vec3 whitexyY = XYZToxyY(REC709ToXYZ(vec3(1.0)));
@@ -101,6 +109,7 @@ vec3 tonemap(vec3 x)
 
   vec3 postDesat = XYZToREC709(xyYToXYZ(xyY));
 
+  // this causes yellow, cyan, magenta to be brighter than the primaries
   float m = max(max(postDesat.x, postDesat.y), postDesat.z);
   float scaleFactor = m / (1.0 + m);
   postDesat *= scaleFactor / m;
@@ -166,11 +175,11 @@ vec3 skyCol(vec3 d) {
 }
 
 vec3 floorCol(vec3 o) {
-  // return (vec3(0.5) + vec3(
-  //   sin(o.x * 20.0),
-  //   sin(o.y * 10.0),
-  //   sin(o.z * 30.0)
-  // ) / PI) * SKY_BRIGHTNESS;
+  return (vec3(0.5) + vec3(
+    sin(o.x * 20.0),
+    sin(o.y * 10.0),
+    sin(o.z * 30.0)
+  ) / PI) * SKY_BRIGHTNESS;
   return vec3(0.01, 0.5, 0.01) * SKY_BRIGHTNESS;
 }
 
@@ -375,13 +384,18 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     if (clipOutOfGamut == 1) {
       displayColour = clipColour(displayColour);
     }
+
+    #iUniform int bitDepth = 8 in {1, 8};
+    float steps = pow(2.0, float(bitDepth));
+
     // add dithering
     #iUniform int useDithering = 1 in {0, 1};
     if (useDithering == 1) {
       // weighted average of the RGB components to get luminance
       float l = 0.299 * displayColour.r + 0.587 * displayColour.g + 0.114 * displayColour.b;
-      float q = 1.0/256.0;
+      float q = 1.0/steps;
       float ditheringAmount = q;
+
       // gradually reduce the amount of dithering as approaching border values
       if (l <= 0.0 || l >= 1.0) {
         ditheringAmount = 0.0;
@@ -390,7 +404,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
       } else if (l > (1.0 - q)) {
         ditheringAmount = 1.0 - l;
       }
-      displayColour += (noise(vec3(uv.x, uv.y, iTime)) - 0.5) * ditheringAmount;
+      displayColour += (noise(vec3(uv.x, uv.y, mod(iTime, 1.0))) - 0.5) * ditheringAmount;
     }
+    // force to 8 bit precision
+    displayColour = floor((displayColour * (steps-1.0)) + 0.5) / (steps-1.0);
     fragColor = vec4(displayColour, 1.0);
 }
