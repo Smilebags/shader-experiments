@@ -14,6 +14,8 @@ const float SKY_BRIGHTNESS = 2.0;
 const float SUN_BRIGHTNESS = 4096.0;
 const float SUN_SIZE = 0.001;
 
+const float VOLUME_TRANSMISSION = 0.2;
+
 vec3 REC709ToXYZ(vec3 rgb) {
   return mat3(
     0.4124564, 0.2126729, 0.0193339,
@@ -93,12 +95,12 @@ vec3 tonemap(vec3 x)
   if(highlightDesaturation != 0.0) {
     float Y = xyY.z;
     // helmholtz-kohlrausch effect
-    float hk_y_term = (0.35 - xyY.y);
-    float hk_x_term = (xyY.x - 0.35);
-    float hk = max(0.0, 2.0 * hk_y_term + 2.0 * hk_x_term);
+    // float hk_y_term = (0.35 - xyY.y);
+    // float hk_x_term = (xyY.x - 0.35);
+    // float hk = max(0.0, 2.0 * hk_y_term + 2.0 * hk_x_term);
     // return vec3(hk);
     float luminanceMultiplier = 1.0;
-    luminanceMultiplier = hk + 1.0;
+    // luminanceMultiplier = hk + 1.0;
     float reinhardtBrightness = 1.0 / (1.0 + (Y * luminanceMultiplier));
     float saturationFactor = pow(reinhardtBrightness, highlightDesaturation);
     float desaturationFactor = 1.0 - saturationFactor;
@@ -270,20 +272,44 @@ float hardShadow(vec3 o, vec3 d) {
   return 1.0;
 }
 
-vec4 trace(vec3 o, vec3 d) {
+struct TraceResult // user defined structure.
+{
+  vec3 destination;
+  float color;
+  float light;
+  float transmission;
+};
+
+TraceResult trace(vec3 o, vec3 d) {
   int iterations = 0;
-  int maxIterations = 1 << 6;
+  int maxIterations = 1 << 5;
+  float rayLight = 0.0;
+  float rayTransmission = 1.0;
   while (iterations < maxIterations) {
     vec2 result = sdWorld(o);
     float minDist = result.x;
     float col = result.y;
+    // accumulate transmission
+    rayTransmission *= pow(VOLUME_TRANSMISSION, minDist);
+    // accumulate volume light from middle of segment
+    float canSeeSun = hardShadow(
+      o + (d * minDist * 0.5),
+      d
+    );
+    if (canSeeSun == 1.0) {
+      rayLight += 1.0;
+    }
+    rayLight *= pow(VOLUME_TRANSMISSION, minDist);
+    // move origin forward
     o += d * minDist;
+    
     if (minDist <= EPSILON) {
-      return vec4(o, col);
+      return TraceResult(o, col, rayLight, rayTransmission);
+
     }
     iterations += 1;
   }
-  return vec4(o, SKY);
+  return TraceResult(o, SKY, rayLight, rayTransmission);
 }
 
 vec4 shadeParams(vec3 o, vec3 d, float matIndex) {
@@ -324,9 +350,12 @@ vec3 shadeSimple(vec3 o, vec3 d, float matIndex) {
   return shadeMix(params.xyz, ref, shadeFactor, fresnel, params.w);
 }
 
-vec3 shade(vec3 o, vec3 d, float matIndex) {
+vec3 shade(vec3 o, vec3 d, float matIndex, float light, float transmission) {
+  // return vec3(transmission);
   if(matIndex == SKY) {
-    return skyCol(d).xyz;
+    vec3 skyResult = skyCol(d).xyz;
+    skyResult *= transmission;
+    return skyResult + vec3(light);
   }
   vec3 n = normal(o);
   float cameraFacing = dot(n, d * -1.0);
@@ -337,9 +366,9 @@ vec3 shade(vec3 o, vec3 d, float matIndex) {
   
   vec4 params = shadeParams(o, d, matIndex);
   vec3 newD = reflect(d, n);
-  vec4 reflectedPoint = trace(o + n * EPSILON * 2.0, newD);
-  vec3 ref = shadeSimple(reflectedPoint.xyz, newD, reflectedPoint.w);
-  return shadeMix(params.xyz, ref, shadeFactor, fresnel, params.w);
+  TraceResult result = trace(o + n * EPSILON * 2.0, newD);
+  vec3 ref = shadeSimple(result.destination, newD, result.color);
+  return shadeMix(params.xyz, ref, shadeFactor, fresnel, params.w) * transmission + vec3(light);
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord)
@@ -372,9 +401,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     vec3 right = normalize(cross(facing, globalUp));
     vec3 down = normalize(cross(facing, right));
     vec3 rayDirection = normalize(facing + (right * (uvCover.x / zoom)) + (-down * (uvCover.y / zoom)));
-    vec4 result = trace(o, rayDirection);
-    float matIndex = result.w;
-    vec3 col = shade(result.xyz, rayDirection, matIndex);
+    TraceResult result = trace(o, rayDirection);
+    float matIndex = result.color;
+    vec3 col = shade(result.destination, rayDirection, matIndex, result.light, result.transmission);
 
     #iUniform float ev = 0.0 in {-10.0, 10.0};
     #iUniform float tonemapSwipe = 1.0 in {0.0, 1.0};
